@@ -30,6 +30,31 @@ import yaml
 
 HARNESS_DIR = Path(__file__).resolve().parent.parent
 REPOS_YAML = HARNESS_DIR / "agents" / "cross_repo" / "repos.yaml"
+LOCAL_ENV_FILE = HARNESS_DIR / "smoke" / ".env.smoke"
+
+
+def _load_local_env() -> None:
+    """Fill os.environ from smoke/.env.smoke (gitignored, dotenv-style).
+
+    Process env always wins (setdefault). This makes machine-local path
+    overrides (HARNESS_REPOS_ROOT, HARNESS_<KEY>_DIR, ...) durable without
+    relying on env propagation through the agent runtime — Omnigent runs
+    sessions under a tmux server whose environment does NOT inherit fresh
+    exports from your launching shell.
+    """
+    if not LOCAL_ENV_FILE.is_file():
+        return
+    for line in LOCAL_ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip("'\"")
+        if key:
+            os.environ.setdefault(key, value)
+
+
+_load_local_env()
 
 
 def _expand(value: str) -> str:

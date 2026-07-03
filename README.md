@@ -114,15 +114,19 @@ omni setup          # interactive credential picker (Claude + optional Codex)
 omni config list    # verify at least one Claude credential is default
 ```
 
-Then point the harness at your repos — either edit
-`agents/cross_repo/repos.yaml` defaults, or set the per-repo env vars:
+Then point the harness at your repos. **Preferred: the machine-local env
+file** (auto-loaded by `harness_repos.py`; survives the agent runtime's env
+isolation, unlike shell exports):
 
 ```bash
-export HARNESS_REPOS_ROOT=~/repos          # parent dir of your checkouts
-export HARNESS_BACKEND_DIR=~/repos/backend # overrides for individual repos
-export HARNESS_DIR=~/repos/my-agent-harness # this checkout (tools/ location)
-uv run tools/harness_repos.py check        # confirm paths resolve
+cp smoke/.env.smoke.example smoke/.env.smoke
+$EDITOR smoke/.env.smoke      # set HARNESS_REPOS_ROOT / HARNESS_<KEY>_DIR / HARNESS_DIR
+uv run tools/harness_repos.py check   # confirm paths resolve
 ```
+
+Alternatively edit the `path_default`s in `agents/cross_repo/repos.yaml`, or
+set the env vars in your shell rc (note: exports made just-in-time in your
+launching shell may not reach the agent runtime — see Known gotchas).
 
 ## Path & branch conventions
 
@@ -291,6 +295,13 @@ leftover state. Run the cleanup above (or pick a different slug) and re-run.
 
 ## Known gotchas (Omnigent 0.1.x)
 
+- **A lingering Omnigent server ignores your fresh env exports.** `omni run`
+  connects to an already-running server if one exists, so `HARNESS_*` vars
+  exported in your launching shell never reach the agent — path resolution
+  silently falls back to the repos.yaml defaults. Fix: put the exports in your
+  shell rc, or run `omni stop` before launching so the new server inherits
+  your environment. (The orchestrator's `exists: true` validation catches the
+  misresolution and stops before any worktree work.)
 - **`claude-native` sub-agents hang silently** when spawned headlessly with
   subscription auth. Workaround: use `claude-sdk` for sub-agents (bundles do).
 - **`darwin_seatbelt` sandbox blocks Python's tempdir access**. Bundles set
