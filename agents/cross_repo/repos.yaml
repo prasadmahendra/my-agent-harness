@@ -1,0 +1,130 @@
+# repos.yaml — the configurable set of repositories cross_repo operates on.
+#
+# This file is the ONE place you edit to add, remove, or re-purpose a repo.
+# The cross_repo orchestrator reads it (via `tools/harness_repos.py resolve`)
+# and drives one coder + one reviewer per in-scope repo. Nothing about the
+# repo set is hardcoded in the agent prompts.
+#
+# Add a repo  = add a list entry below.
+# Drop a repo = delete its entry.
+# No YAML in the agent bundles needs to change.
+
+spec_version: 1
+
+# ---------------------------------------------------------------------------
+# Global settings
+# ---------------------------------------------------------------------------
+
+# Parent directory that holds all your repo checkouts. Resolved at runtime
+# from `env` (if set) else `default`. `default` may reference $HOME and other
+# env vars — they are expanded by the resolver.
+repos_root:
+  env: HARNESS_REPOS_ROOT
+  default: "$HOME/repos"
+
+# Worktrees for each run land at:
+#   <repos_root>/.harness-worktrees/<repo-key>/<slug>/
+# on a branch named "<branch_prefix>/<slug>".
+branch_prefix: "cross-repo"
+
+# ---------------------------------------------------------------------------
+# The repos
+# ---------------------------------------------------------------------------
+#
+# Each entry:
+#   key            required. Short kebab/snake id. Used for worktree dir,
+#                  dispatch title suffix (`<slug>-<key>`), and env var name.
+#   purpose        required. Free-form role label shown to the coder/reviewer
+#                  (e.g. frontend, backend, terraform, mobile, docs).
+#   description    optional. One line describing the repo, shown to agents.
+#   path_env       optional. Env var that overrides this repo's checkout path.
+#                  Defaults to HARNESS_<KEY_UPPER>_DIR if omitted.
+#   path_default   optional. Path used when path_env is unset. Relative paths
+#                  are resolved against repos_root; absolute paths used as-is.
+#                  Defaults to "<repos_root>/<key>" if omitted.
+#   github         optional. "owner/name" for `gh pr create --repo`. If unset,
+#                  the auto-PR step is skipped for this repo (with a note).
+#   subdir         optional. Sub-path within the repo where the app/module
+#                  lives (e.g. a frontend app in a monorepo subfolder).
+#   verify_hint    optional. Guidance handed to the coder for how to verify a
+#                  change in this repo (test/typecheck/lint/plan commands).
+#   review_conventions  optional. Repo-specific rules handed to the reviewer.
+#   smoke          optional. If present, this repo participates in the local
+#                  smoke stack (see smoke/docker-compose.yml + tools/smoke.py).
+#                  Repos without a `smoke` block are simply skipped at bring-up.
+#
+# The three entries below are illustrative examples — edit them for your org.
+
+repos:
+  - key: backend
+    purpose: backend
+    description: "Backend service / API monorepo."
+    path_env: HARNESS_BACKEND_DIR
+    path_default: "backend"
+    github: "your-org/backend"
+    verify_hint: >-
+      Run the scoped unit tests for the files you touched (e.g.
+      `uv run pytest <path>` or the repo's test runner) and a typecheck.
+      Drive them to green. Prefer scoped commands over whole-suite runs.
+    review_conventions: |
+      - Follow the layering / architecture conventions in the repo's CLAUDE.md
+        (thin input adapters, business logic in use cases, IO in adapters).
+      - Type hints / annotations required on all new code.
+      - Tests required for new code; missing coverage is blocking on a code
+        change, non-blocking on a docs change.
+      - No hardcoded secrets; no raw SQL string interpolation; scope
+        multi-tenant reads by user/tenant id.
+    smoke:
+      role: backend
+      port: 8083
+      dockerfile: "docker/Dockerfile"   # relative to the repo worktree
+      context_subdir: "."               # build context within the worktree
+      # Backend runtime env comes from smoke/.env.smoke (see the example file).
+
+  - key: frontend
+    purpose: frontend
+    description: "Web front-end. App lives in the `app` subdir."
+    path_env: HARNESS_FRONTEND_DIR
+    path_default: "frontend"
+    github: "your-org/frontend"
+    subdir: "app"
+    verify_hint: >-
+      Run a scoped check that fits the change (typecheck `tsc --noEmit`, a
+      scoped `vitest run <path>`, or a targeted lint). Avoid whole-repo lint
+      runs if the repo carries pre-existing baseline warnings.
+    review_conventions: |
+      - Use generated GQL/codegen types, not hand-rolled response interfaces.
+      - Gate dev-only / diagnostic surfaces behind a DEV flag.
+      - Follow existing component patterns; don't bypass shared structures.
+      - Guard nullable API fields; correct hook dependency arrays; no direct
+        state mutation.
+      - Tests required for new hook/handler behavior.
+    smoke:
+      role: frontend
+      port: 3000
+      context_subdir: "app"             # build context = worktree/app
+      dockerfile: "smoke/Dockerfile.frontend"
+      dockerfile_from: harness          # dockerfile path is relative to the
+                                        # harness dir (a generic FE image),
+                                        # not the repo. Default is `repo`.
+      # Injected into the FE build so the browser can reach the backend on the
+      # host's published port. Adjust the path to your API base.
+      backend_endpoint: "http://localhost:8083/api/v1"
+
+  - key: infra
+    purpose: terraform
+    description: "Infrastructure-as-code (Terraform)."
+    path_env: HARNESS_INFRA_DIR
+    path_default: "infra"
+    github: "your-org/infra"
+    verify_hint: >-
+      Run `terraform fmt -check` and `terraform validate` in the module(s)
+      you touched. Do NOT run `terraform apply` or anything that mutates
+      real infrastructure.
+    review_conventions: |
+      - No hardcoded secrets or account ids; use variables / remote state.
+      - Modules parameterized and reusable, not copy-pasted.
+      - Changes are plan-only safe; nothing here should imply an apply.
+      - State/backends untouched unless the task explicitly calls for it.
+    # No `smoke` block: terraform has nothing to bring up, so it is skipped
+    # by the smoke stack automatically.

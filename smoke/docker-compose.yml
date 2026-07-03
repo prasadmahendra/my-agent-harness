@@ -1,0 +1,63 @@
+# Config-driven smoke-test compose for cross_repo runs.
+#
+# Invoked via `uv run tools/smoke.py up <slug>` (NOT `docker compose up`
+# directly): the script reads repos.yaml, finds repos with a `smoke:` block,
+# resolves their worktree paths, exports the env vars below, and brings up ONLY
+# the services whose role is present (backend, frontend, or both).
+#
+# Env vars set by tools/smoke.py:
+#   BACKEND_CONTEXT / BACKEND_DOCKERFILE / BACKEND_PORT
+#   FRONTEND_CONTEXT / FRONTEND_DOCKERFILE / FRONTEND_PORT / FRONTEND_BACKEND_ENDPOINT
+#   BACKEND_ENV_FILE   host env-file mounted into the backend (default /dev/null)
+#   DB_LOCAL_ON_DISK   "true" (sqlite) / "false" (aurora) passthrough
+#
+# This file is intentionally generic: NO app-specific runtime config lives
+# here. Backend runtime env (service name, cloud creds, DB host, provider
+# keys, etc.) belongs in smoke/.env.smoke (auto-mounted as BACKEND_ENV_FILE).
+# See smoke/.env.smoke.example.
+
+services:
+  backend:
+    build:
+      context: ${BACKEND_CONTEXT:-/dev/null}
+      dockerfile: ${BACKEND_DOCKERFILE:-Dockerfile}
+    # Host env-file with the backend's real runtime config / creds. Defaults to
+    # an empty file so a stack with no secrets still boots.
+    env_file:
+      - ${BACKEND_ENV_FILE:-/dev/null}
+    environment:
+      # Generic passthroughs. Everything app-specific comes from BACKEND_ENV_FILE.
+      DB_ENABLE_LOCAL_ON_DISK: ${DB_LOCAL_ON_DISK:-true}
+    volumes:
+      # Mount the host AWS SSO token cache read-only (harmless if unused).
+      - ${HOME}/.aws:/root/.aws:ro
+    ports:
+      - "${BACKEND_PORT:-8083}:${BACKEND_PORT:-8083}"
+    healthcheck:
+      # Confirm the service is listening on its port — enough to gate the FE.
+      test:
+        - CMD-SHELL
+        - "python -c \"import socket,sys,os; p=int(os.environ.get('BACKEND_PORT','8083')); s=socket.socket(); s.settimeout(2); s.connect(('localhost', p))\""
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-/dev/null}
+      dockerfile: ${FRONTEND_DOCKERFILE:-Dockerfile}
+    environment:
+      # A browser SPA runs GraphQL/API calls ON THE HOST, where the in-network
+      # `backend` hostname is not resolvable — point it at the published port.
+      FRONTEND_BACKEND_ENDPOINT: ${FRONTEND_BACKEND_ENDPOINT:-http://localhost:8083}
+      # Common Vite alias for the same value; harmless if the app ignores it.
+      VITE_BACKEND_ENDPOINT: ${FRONTEND_BACKEND_ENDPOINT:-http://localhost:8083}
+    ports:
+      - "${FRONTEND_PORT:-3000}:${FRONTEND_PORT:-3000}"
+    depends_on:
+      backend:
+        condition: service_healthy
+        # required: false lets a frontend-only `up` start without a backend
+        # service in the set (the common case still has both).
+        required: false

@@ -1,0 +1,30 @@
+# Generic smoke-only frontend image for a Node/Vite web app.
+#
+# Build context: the frontend repo's worktree (+ optional subdir), set by
+# tools/smoke.py as FRONTEND_CONTEXT. `npm ci` is baked in — no source
+# bind-mount on host (avoids the macOS bind-mount perf cliff + cross-arch
+# native-binary mismatch for esbuild/etc.). Images rebuild on each
+# `smoke.py up`; Docker layer cache keeps unchanged builds fast.
+#
+# Assumptions (adjust for your app if they don't hold):
+#   - package.json + package-lock.json at the context root.
+#   - A Vite dev server started via `npx vite`.
+# For a non-Vite app, point the repo's smoke config at your own Dockerfile
+# (drop `dockerfile_from: harness`) instead of using this generic one.
+
+FROM node:22
+
+WORKDIR /app
+
+# Copy lockfiles first to maximize layer cache hits when only source changes.
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Then copy the rest of the app.
+COPY . .
+
+EXPOSE 3000
+
+# --host 0.0.0.0 is REQUIRED — Vite's default 127.0.0.1 bind is unreachable
+# from the host through the published port. --port pins it to 3000.
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "3000"]

@@ -1,0 +1,21 @@
+# JetBrains IDEs (IntelliJ, PyCharm, etc.)
+.idea/
+
+# VS Code local state
+.vscode/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# uv
+uv.lock
+
+# Local smoke creds (holds provider keys, cloud tokens, etc.). The committed
+# template is smoke/.env.smoke.example — copy it to .env.smoke and edit
+# locally. tools/smoke.py auto-discovers .env.smoke when present.
+smoke/.env.smoke
